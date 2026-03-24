@@ -121,4 +121,7 @@ export interface ResolvedServer {
   priority: number
   env?: Record<string, string>
   initialization?: Record<string, unknown>
+  request_timeout?: number
+  init_timeout?: number
+  idle_timeout?: number
 }

@@ -8,19 +8,22 @@ export function findServerForExtension(ext: string): ServerLookupResult {
 
   for (const server of servers) {
     if (server.extensions.includes(ext) && isServerInstalled(server.command)) {
-      return {
-        status: "found",
-        server: {
-          id: server.id,
-          command: server.command,
-          extensions: server.extensions,
-          priority: server.priority,
-          env: server.env,
-          initialization: server.initialization,
-        },
+        return {
+          status: "found",
+          server: {
+            id: server.id,
+            command: server.command,
+            extensions: server.extensions,
+            priority: server.priority,
+            env: server.env,
+            initialization: server.initialization,
+            request_timeout: server.request_timeout,
+            init_timeout: server.init_timeout,
+            idle_timeout: server.idle_timeout,
+          },
+        }
       }
     }
-  }
 
   for (const server of servers) {
     if (server.extensions.includes(ext)) {

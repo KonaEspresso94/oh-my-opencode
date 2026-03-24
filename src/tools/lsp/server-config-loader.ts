@@ -13,16 +13,28 @@ interface LspEntry {
   priority?: number
   env?: Record<string, string>
   initialization?: Record<string, unknown>
+  request_timeout?: number
+  init_timeout?: number
+  idle_timeout?: number
 }
 
 interface ConfigJson {
   lsp?: Record<string, LspEntry>
+  lsp_timeouts?: {
+    request_timeout?: number
+    init_timeout?: number
+    idle_timeout?: number
+  }
 }
 
 type ConfigSource = "project" | "user" | "opencode"
 
 interface ServerWithSource extends ResolvedServer {
   source: ConfigSource
+}
+
+function validateTimeout(value: unknown): number | undefined {
+  return typeof value === "number" && value > 0 ? value : undefined
 }
 
 export function loadJsonFile<T>(path: string): T | null {
@@ -68,6 +80,22 @@ export function getMergedServers(): ServerWithSource[] {
 
   const sources: ConfigSource[] = ["project", "user", "opencode"]
 
+  const globalTimeouts: { request_timeout?: number; init_timeout?: number; idle_timeout?: number } = {}
+  for (const source of sources) {
+    const config = configs.get(source)
+    if (!config?.lsp_timeouts) continue
+
+    if (globalTimeouts.request_timeout === undefined) {
+      globalTimeouts.request_timeout = validateTimeout(config.lsp_timeouts.request_timeout)
+    }
+    if (globalTimeouts.init_timeout === undefined) {
+      globalTimeouts.init_timeout = validateTimeout(config.lsp_timeouts.init_timeout)
+    }
+    if (globalTimeouts.idle_timeout === undefined) {
+      globalTimeouts.idle_timeout = validateTimeout(config.lsp_timeouts.idle_timeout)
+    }
+  }
+
   for (const source of sources) {
     const config = configs.get(source)
     if (!config?.lsp) continue
@@ -88,6 +116,9 @@ export function getMergedServers(): ServerWithSource[] {
         priority: entry.priority ?? 0,
         env: entry.env,
         initialization: entry.initialization,
+        request_timeout: validateTimeout(entry.request_timeout) ?? globalTimeouts.request_timeout,
+        init_timeout: validateTimeout(entry.init_timeout) ?? globalTimeouts.init_timeout,
+        idle_timeout: validateTimeout(entry.idle_timeout) ?? globalTimeouts.idle_timeout,
         source,
       })
       seen.add(id)
@@ -97,14 +128,17 @@ export function getMergedServers(): ServerWithSource[] {
   for (const [id, config] of Object.entries(BUILTIN_SERVERS)) {
     if (disabled.has(id) || seen.has(id)) continue
 
-    servers.push({
-      id,
-      command: config.command,
-      extensions: config.extensions,
-      priority: -100,
-      source: "opencode",
-    })
-  }
+      servers.push({
+        id,
+        command: config.command,
+        extensions: config.extensions,
+        priority: -100,
+        request_timeout: globalTimeouts.request_timeout,
+        init_timeout: globalTimeouts.init_timeout,
+        idle_timeout: globalTimeouts.idle_timeout,
+        source: "opencode",
+      })
+    }
 
   return servers.sort((a, b) => {
     if (a.source !== b.source) {
@@ -113,4 +147,35 @@ export function getMergedServers(): ServerWithSource[] {
     }
     return b.priority - a.priority
   })
+}
+
+export function getGlobalLspTimeouts(): {
+  request_timeout?: number
+  init_timeout?: number
+  idle_timeout?: number
+} {
+  const configs = loadAllConfigs()
+  const sources: ConfigSource[] = ["project", "user", "opencode"]
+  const result: {
+    request_timeout?: number
+    init_timeout?: number
+    idle_timeout?: number
+  } = {}
+
+  for (const source of sources) {
+    const config = configs.get(source)
+    if (!config?.lsp_timeouts) continue
+
+    if (result.request_timeout === undefined) {
+      result.request_timeout = validateTimeout(config.lsp_timeouts.request_timeout)
+    }
+    if (result.init_timeout === undefined) {
+      result.init_timeout = validateTimeout(config.lsp_timeouts.init_timeout)
+    }
+    if (result.idle_timeout === undefined) {
+      result.idle_timeout = validateTimeout(config.lsp_timeouts.idle_timeout)
+    }
+  }
+
+  return result
 }
