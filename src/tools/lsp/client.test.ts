@@ -24,6 +24,53 @@ describe("LSPClient", () => {
     await lspManager.stopAll()
   })
 
+  describe("request timeout configuration", () => {
+    it("uses server request_timeout when provided", () => {
+      // #given
+      const dir = mkdtempSync(join(tmpdir(), "lsp-client-timeout-test-"))
+      const server: ResolvedServer = {
+        id: "typescript",
+        command: ["typescript-language-server", "--stdio"],
+        extensions: [".ts"],
+        priority: 0,
+        request_timeout: 30000,
+      }
+      const client = new LSPClient(dir, server)
+
+      try {
+        // #when
+        const requestTimeout = (client as unknown as { requestTimeout: number }).requestTimeout
+
+        // #then
+        expect(requestTimeout).toBe(30000)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it("defaults request_timeout to 15000 when not provided", () => {
+      // #given
+      const dir = mkdtempSync(join(tmpdir(), "lsp-client-timeout-test-"))
+      const server: ResolvedServer = {
+        id: "typescript",
+        command: ["typescript-language-server", "--stdio"],
+        extensions: [".ts"],
+        priority: 0,
+      }
+      const client = new LSPClient(dir, server)
+
+      try {
+        // #when
+        const requestTimeout = (client as unknown as { requestTimeout: number }).requestTimeout
+
+        // #then
+        expect(requestTimeout).toBe(15000)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+  })
+
   describe("openFile", () => {
     it("sends didChange when a previously opened file changes on disk", async () => {
       // #given
@@ -59,7 +106,7 @@ describe("LSPClient", () => {
         await client.openFile(filePath)
 
         // #then
-        const methods = sendNotificationSpy.mock.calls.map((c) => c[0])
+        const methods = sendNotificationSpy.mock.calls.map((c: unknown[]) => c[0])
         expect(methods).toContain("textDocument/didOpen")
         expect(methods).toContain("textDocument/didChange")
       } finally {
@@ -113,7 +160,7 @@ describe("LSPClient", () => {
       }
     })
 
-    it("resets stale initializing entry so a hung init does not permanently block future clients", async () => {
+    it("resets stale initializing entry after default timeout so a hung init does not permanently block future clients", async () => {
       //#given
       const dir = mkdtempSync(join(tmpdir(), "lsp-manager-stale-test-"))
 
@@ -155,6 +202,74 @@ describe("LSPClient", () => {
           lspManager.getClient(dir, server),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error("test-timeout")), 50)),
         ])
+
+        //#then
+        expect(client).toBeInstanceOf(LSPClient)
+        expect(startSpy).toHaveBeenCalledTimes(2)
+        expect(stopSpy).toHaveBeenCalled()
+      } finally {
+        dateNowSpy.mockRestore()
+        startSpy.mockRestore()
+        initializeSpy.mockRestore()
+        isAliveSpy.mockRestore()
+        stopSpy.mockRestore()
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it("uses custom init_timeout when deciding whether a hung init is stale", async () => {
+      //#given
+      const dir = mkdtempSync(join(tmpdir(), "lsp-manager-stale-custom-timeout-test-"))
+
+      const server: ResolvedServer = {
+        id: "typescript",
+        command: ["typescript-language-server", "--stdio"],
+        extensions: [".ts"],
+        priority: 0,
+        init_timeout: 120_000,
+      }
+
+      const dateNowSpy = spyOn(Date, "now")
+
+      const startSpy = spyOn(LSPClient.prototype, "start")
+      const initializeSpy = spyOn(LSPClient.prototype, "initialize")
+      const isAliveSpy = spyOn(LSPClient.prototype, "isAlive")
+      const stopSpy = spyOn(LSPClient.prototype, "stop")
+
+      // Init hangs forever until the custom timeout should kick in later.
+      const never = new Promise<void>(() => {})
+      startSpy.mockImplementationOnce(async () => {
+        await never
+      })
+      startSpy.mockImplementation(async () => {})
+      initializeSpy.mockImplementation(async () => {})
+      isAliveSpy.mockImplementation(() => true)
+      stopSpy.mockImplementation(async () => {})
+
+      try {
+        //#when
+        dateNowSpy.mockReturnValueOnce(0)
+        lspManager.warmupClient(dir, server)
+
+        dateNowSpy.mockReturnValueOnce(60_000)
+
+        await expect(
+          Promise.race([
+            lspManager.getClient(dir, server),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("custom-timeout-not-stale")), 50),
+            ),
+          ]),
+        ).rejects.toThrow("custom-timeout-not-stale")
+
+        //#then
+        expect(startSpy).toHaveBeenCalledTimes(1)
+        expect(stopSpy).not.toHaveBeenCalled()
+
+        //#when
+        dateNowSpy.mockReturnValue(120_000)
+
+        const client = await lspManager.getClient(dir, server)
 
         //#then
         expect(client).toBeInstanceOf(LSPClient)
