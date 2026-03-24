@@ -1,6 +1,7 @@
 import { LSPClient } from "./lsp-client";
 import { registerLspManagerProcessCleanup, type LspProcessCleanupHandle } from "./lsp-manager-process-cleanup";
 import { cleanupTempDirectoryLspClients } from "./lsp-manager-temp-directory-cleanup";
+import { getGlobalLspTimeouts } from "./server-config-loader";
 import type { ResolvedServer } from "./types";
 interface ManagedClient {
   client: LSPClient;
@@ -14,7 +15,6 @@ class LSPServerManager {
   private static instance: LSPServerManager;
   private clients = new Map<string, ManagedClient>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly IDLE_TIMEOUT = 5 * 60 * 1000;
   private readonly INIT_TIMEOUT = 60 * 1000;
   private cleanupHandle: LspProcessCleanupHandle | null = null;
   private constructor() {
@@ -56,8 +56,9 @@ class LSPServerManager {
 
   private cleanupIdleClients(): void {
     const now = Date.now();
+    const idleTimeout = getGlobalLspTimeouts().idle_timeout ?? 300000;
     for (const [key, managed] of this.clients) {
-      if (managed.refCount === 0 && now - managed.lastUsedAt > this.IDLE_TIMEOUT) {
+      if (managed.refCount === 0 && now - managed.lastUsedAt > idleTimeout) {
         managed.client.stop();
         this.clients.delete(key);
       }
