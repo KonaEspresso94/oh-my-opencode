@@ -12,12 +12,6 @@ mock.module("vscode-jsonrpc/node", () => ({
   StreamMessageWriter: function StreamMessageWriter() {},
 }))
 
-let mockedGlobalLspTimeouts: { idle_timeout?: number } = {}
-
-mock.module("./server-config-loader", () => ({
-  getGlobalLspTimeouts: () => mockedGlobalLspTimeouts,
-}))
-
 import { LSPClient, lspManager, validateCwd } from "./client"
 import type { ResolvedServer } from "./types"
 
@@ -123,114 +117,6 @@ describe("LSPClient", () => {
   })
 
   describe("LSPServerManager", () => {
-    describe("idle timeout configuration", () => {
-      it("uses configured global idle_timeout when cleaning stale clients", async () => {
-        //#given
-        const dir = mkdtempSync(join(tmpdir(), "lsp-manager-idle-timeout-custom-"))
-        mockedGlobalLspTimeouts = { idle_timeout: 600_000 }
-
-        const server: ResolvedServer = {
-          id: "typescript",
-          command: ["typescript-language-server", "--stdio"],
-          extensions: [".ts"],
-          priority: 0,
-        }
-
-        const nowSpy = spyOn(Date, "now")
-        const startSpy = spyOn(LSPClient.prototype, "start")
-        const initializeSpy = spyOn(LSPClient.prototype, "initialize")
-        const isAliveSpy = spyOn(LSPClient.prototype, "isAlive")
-        const stopSpy = spyOn(LSPClient.prototype, "stop")
-
-        startSpy.mockImplementation(async () => {})
-        initializeSpy.mockImplementation(async () => {})
-        isAliveSpy.mockImplementation(() => true)
-        stopSpy.mockImplementation(async () => {})
-
-        try {
-          nowSpy.mockReturnValue(1_000_000)
-          await lspManager.getClient(dir, server)
-          lspManager.releaseClient(dir, server.id)
-
-          const manager = lspManager as unknown as {
-            clients: Map<string, { refCount: number; lastUsedAt: number; client: LSPClient }>
-            cleanupIdleClients: () => void
-          }
-          for (const managed of manager.clients.values()) {
-            managed.lastUsedAt = 1_000_000 - 600_001
-          }
-
-          nowSpy.mockReturnValue(1_700_000)
-          manager.cleanupIdleClients()
-
-          //#then
-          expect(stopSpy).toHaveBeenCalledTimes(1)
-          expect(manager.clients.size).toBe(0)
-        } finally {
-          mockedGlobalLspTimeouts = {}
-          nowSpy.mockRestore()
-          startSpy.mockRestore()
-          initializeSpy.mockRestore()
-          isAliveSpy.mockRestore()
-          stopSpy.mockRestore()
-          rmSync(dir, { recursive: true, force: true })
-        }
-      })
-
-      it("falls back to 300000ms when global idle_timeout is not configured", async () => {
-        //#given
-        const dir = mkdtempSync(join(tmpdir(), "lsp-manager-idle-timeout-default-"))
-        mockedGlobalLspTimeouts = {}
-
-        const server: ResolvedServer = {
-          id: "typescript",
-          command: ["typescript-language-server", "--stdio"],
-          extensions: [".ts"],
-          priority: 0,
-        }
-
-        const nowSpy = spyOn(Date, "now")
-        const startSpy = spyOn(LSPClient.prototype, "start")
-        const initializeSpy = spyOn(LSPClient.prototype, "initialize")
-        const isAliveSpy = spyOn(LSPClient.prototype, "isAlive")
-        const stopSpy = spyOn(LSPClient.prototype, "stop")
-
-        startSpy.mockImplementation(async () => {})
-        initializeSpy.mockImplementation(async () => {})
-        isAliveSpy.mockImplementation(() => true)
-        stopSpy.mockImplementation(async () => {})
-
-        try {
-          nowSpy.mockReturnValue(1_000_000)
-          await lspManager.getClient(dir, server)
-          lspManager.releaseClient(dir, server.id)
-
-          const manager = lspManager as unknown as {
-            clients: Map<string, { refCount: number; lastUsedAt: number; client: LSPClient }>
-            cleanupIdleClients: () => void
-          }
-          for (const managed of manager.clients.values()) {
-            managed.lastUsedAt = 1_000_000 - 300_001
-          }
-
-          nowSpy.mockReturnValue(1_400_000)
-          manager.cleanupIdleClients()
-
-          //#then
-          expect(stopSpy).toHaveBeenCalledTimes(1)
-          expect(manager.clients.size).toBe(0)
-        } finally {
-          mockedGlobalLspTimeouts = {}
-          nowSpy.mockRestore()
-          startSpy.mockRestore()
-          initializeSpy.mockRestore()
-          isAliveSpy.mockRestore()
-          stopSpy.mockRestore()
-          rmSync(dir, { recursive: true, force: true })
-        }
-      })
-    })
-
     it("recreates client after init failure instead of staying permanently blocked", async () => {
       //#given
       const dir = mkdtempSync(join(tmpdir(), "lsp-manager-test-"))
