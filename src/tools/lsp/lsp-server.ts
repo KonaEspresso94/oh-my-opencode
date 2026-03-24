@@ -69,11 +69,11 @@ class LSPServerManager {
     let managed = this.clients.get(key);
     if (managed) {
       const now = Date.now();
-      if (
-        managed.isInitializing &&
-        managed.initializingSince !== undefined &&
-        now - managed.initializingSince >= this.INIT_TIMEOUT
-      ) {
+        if (
+          managed.isInitializing &&
+          managed.initializingSince !== undefined &&
+          now - managed.initializingSince >= (server.init_timeout ?? this.INIT_TIMEOUT)
+        ) {
         // Stale init can permanently block subsequent calls (e.g., LSP process hang)
         try {
           await managed.client.stop();
